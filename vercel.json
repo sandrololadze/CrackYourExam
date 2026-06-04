@@ -1,1 +1,6 @@
-{}
+{
+  "routes": [
+    { "src": "/api/chat", "dest": "/api/chat.js" },
+    { "src": "/api/tts",  "dest": "/api/tts.js"  }
+  ]
+}
