@@ -4,49 +4,43 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-  if (!GEMINI_API_KEY) {
-    return res.status(500).json({ error: 'API key not configured on server.' });
+  const CRAZYROUTER_KEY = process.env.CRAZYROUTER_API_KEY;
+  if (!CRAZYROUTER_KEY) {
+    return res.status(500).json({ error: { message: 'API key not configured on server.' } });
   }
 
   try {
     const { system, messages, max_tokens = 1000 } = req.body;
 
-    // Convert to Gemini format
-    const contents = messages.map(m => ({
-      role: m.role === 'assistant' ? 'model' : 'user',
-      parts: [{ text: m.content }]
-    }));
+    // Build OpenAI-compatible messages array
+    const openAiMessages = [];
+    if (system) openAiMessages.push({ role: 'system', content: system });
+    if (Array.isArray(messages)) openAiMessages.push(...messages);
 
-    const body = {
-      contents,
-      generationConfig: { maxOutputTokens: max_tokens }
-    };
-    if (system) {
-      body.systemInstruction = { parts: [{ text: system }] };
-    }
+    const upstream = await fetch('https://api.crazyrouter.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${CRAZYROUTER_KEY}`
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-6',
+        max_tokens,
+        messages: openAiMessages
+      })
+    });
 
-    const geminiRes = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body)
-      }
-    );
-
-    const data = await geminiRes.json();
+    const data = await upstream.json();
 
     if (data.error) {
       return res.status(400).json({ error: data.error });
     }
 
-    const text = data.candidates?.[0]?.content?.parts?.map(p => p.text || '').join('') || '';
-
-    // Return in shape the frontend expects
-    res.status(200).json({ content: [{ type: 'text', text }] });
+    // Normalize to Anthropic-style shape that the frontend expects
+    const text = data.choices?.[0]?.message?.content || '';
+    return res.status(200).json({ content: [{ type: 'text', text }] });
 
   } catch (err) {
-    res.status(500).json({ error: { message: err.message } });
+    return res.status(500).json({ error: { message: err.message || 'Server error' } });
   }
 }
